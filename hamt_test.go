@@ -1,6 +1,7 @@
 package hamt
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -8,7 +9,7 @@ func TestEmptyTrie(t *testing.T) {
 	trie := New()
 	
 	_,e := trie.Get("EMPTY")
-	
+
 	if e==nil {
 		t.Errorf("Not finding a key, which we wont find in an empty trie, must return an err")
 	}
@@ -21,27 +22,87 @@ func TestInsertIntoTrie(t *testing.T) {
 	v1 := "value 1"
 	v2 := "value 2"
 
-	t.Logf("Hash of %v = %v", v1, hash(v1))
-	t.Logf("Hash of %v = %v", v2, hash(v2))
 
 	root := New()
-	t.Logf("%v", (1 | 64 | 4))
-	t.Logf("mask: %v", mask(hash(key1), 0))
-	t.Logf("bitpos: %v", bitpos(hash(key1), 0))
-	v0, e0 := root.Get( key1 )
-	t.Logf("Get [%v, %v]", v0, e0)
 
-	n1 := root.Insert( key1, v1 )
-	t.Logf("%v", n1)
-	n2 := root.Insert( key2, v2 )
-	t.Logf("%v", n2)
+	root.Insert( key1, v1 )
+	root.Insert( key2, v2 )
 
 	vg1, e1 := root.Get( key1 )
-	t.Logf("Get [%v, %v]", vg1, e1)
-
 	vg2, e2 := root.Get( key2 )
-	t.Logf("Get [%v, %v]", vg2, e2)
-//	t.Logf("I stored %s for key %s and searching for key %s i got %s", n1.value, key1, key1, s1.value)
+	
+	if vg1 != v1 || vg2 != v2 {
+		t.Errorf("Set values for keys[%v=%v,%v=%v] do not match returned [%v=%v,%v=%v]",key1,v1,key2,v2,key1,vg1,key2,vg2)
+		t.Errorf("error return: %v, %v", e1, e2)
+	}
 
+	intKeys := make([]interface{}, 256)
+	for i := 0; i < 256; i++ {
+		intKeys[i] = i*2
+	}
+	
+	stringKeys := make([]interface{}, 256)
+	for i := 0; i < 256; i++ {
+		stringKeys[i] = fmt.Sprint("String key", i)
+	}
 
+	insertAndAssureStorageForKeys(intKeys, t)
+	insertAndAssureStorageForKeys(stringKeys, t)
 }
+
+func insertAndAssureStorageForKeys(keys []interface{}, t *testing.T) {
+	tree := New()
+	makeValueForKey := func (key interface{}) string { return fmt.Sprintf("Value for %v", key) }
+
+	for _, k := range keys {
+		v := makeValueForKey(k)
+		tree.Insert(k, v)
+		gv, ge := tree.Get(k)
+		if ge != nil || gv != v {
+			t.Errorf("We blewit! %v not equal to %v for %v", v, gv, k)
+		}
+	}
+
+	for _, k := range keys {
+		expectedValue := makeValueForKey(k)
+		gv, ge := tree.Get(k)
+		if ge != nil || gv != expectedValue {
+			t.Errorf("After full insert of keys we got inequality for key %v.  Expected %v but got %v", k, expectedValue, gv)
+		}
+	}
+}
+
+
+func BenchmarkGoMapIntInsert(b *testing.B) {
+	m := make(map[int] int)
+	for i := 0; i < b.N; i++ {
+		m[i] = i
+	}
+}
+
+func BenchmarkGoMapStringInsert(b *testing.B) {
+	m := make(map[string] string)
+	for i := 0; i < b.N; i++ {
+		k := fmt.Sprintf("String Key %v", i)
+		v := fmt.Sprintf("String Val %v", i)
+		m[k] = v
+	}
+}
+
+
+func BenchmarkHamtIntInsert(b *testing.B) {
+	t := New()
+	for i := 0; i < b.N; i++ {
+		t.Insert(i, i)
+	}
+}
+
+func BenchmarkHamtStringInsert(b *testing.B) {
+	t := New()
+	for i := 0; i < b.N; i++ {
+		k := fmt.Sprintf("String Key %v", i)
+		v := fmt.Sprintf("String Val %v", i)
+		t.Insert(k, v)
+	}
+}
+

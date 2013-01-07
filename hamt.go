@@ -16,16 +16,14 @@ const (
 )
 
 type node interface {
-	assoc(shift int, hash uint64, key interface{}, value interface{}) node
+	assoc(shift int, hash uint64, key interface{}, value interface{}) (last node, leaf *valueNode)
 	without(shift int, hash uint64, key interface{}) node
 	find(shift int, hash uint64, key interface{}) (value interface{}, err error)
-	depth() int
+	pos() uint64
 }
 
-type emptyNode struct {}
-
 type PersistentMap struct {
-	root node
+	root *bitmapNode
 //	collision map[uint]interface{}
 }
 
@@ -33,30 +31,28 @@ type valueNode struct {
 	key interface{}
 	hash uint64
 	value interface{}
-	shift int
+	bitpos uint64
 }
 
 type bitmapNode struct {
 	childBitmap uint64
-	children []*node
-	shift int
+	children []node
+	bitpos uint64
 }
 
-func (n *emptyNode) assoc(shift int, hash uint64, key interface{}, val interface{}) node {
-	return &valueNode {key: key, hash: hash, value: val, shift: shift}
-}
-func (n *emptyNode) without(shift int, hash uint64, key interface{}) node {
-	return n
-}
-func (n *emptyNode) find(shift int, hash uint64, key interface{}) (interface{}, error) {
-	return nil, errors.New(keyNotFound)
-}
-func (n *emptyNode) depth() int {
-	return 0
-}
+func (n *valueNode) assoc(shift int, hash uint64, key interface{}, val interface{}) (last node, leaf *valueNode) {
+	if n.hash == hash {
+		n.value = val
+		last = n
+		leaf = n
+	} else {
+		nn := &bitmapNode{0, make([]node, 2, 2), n.pos()}
+		last = nn
+		nn.assoc(shift, n.hash, key, n.value)
+		_, leaf = nn.assoc(shift, hash, key, val)
+	}
 
-func (n *valueNode) assoc(shift int, hash uint64, key interface{}, val interface{}) node {
-	return &valueNode {key: key, hash: hash, value: val, shift: shift}
+	return last, leaf
 }
 func (n *valueNode) without(shift int, hash uint64, key interface{}) node {
 	return n
@@ -69,96 +65,94 @@ func (n *valueNode) find(shift int, hash uint64, key interface{}) (value interfa
 	}
 	return value, err
 }
-func (n *valueNode) depth() int {
-	return n.shift
+func (n *valueNode) pos() uint64 {
+	return n.bitpos
 }
+
+func (n *bitmapNode) assoc(shift int, hash uint64, key interface{}, val interface{}) (last node, leaf *valueNode) {
+	bitsToShift := uint(shift*fanoutLog2)
+	pos := bitpos(hash, bitsToShift)
+	
+	if (pos & n.childBitmap)  == 0 { //nothing in slot, not found
+		//mark our slot taken and xpand our children
+		n.childBitmap |= pos
+		newChildren := make([]node, (len(n.children) + 1))
+		
+		newChildIndex := n.index(pos)
+		newChild := &valueNode{key, hash, val, pos}
+		newChildren [newChildIndex] = newChild
+
+		for _, c := range n.children {
+			if c != nil {
+				oldChildNewIndex := n.index(c.pos())
+				newChildren[oldChildNewIndex] = c
+			}
+		}
+
+		n.children = newChildren
+		last = n
+		leaf = newChild
+	} else {
+		index := n.index(pos)
+		nodeAtIndex := n.children[index]
+		last, leaf = nodeAtIndex.assoc(shift +1, hash, key, val)
+		
+		if _, isValNode := nodeAtIndex.(*valueNode); isValNode {
+			n.children[index] = last
+		}
+	}
+	return last, leaf
+}
+func (n *bitmapNode) without(shift int, hash uint64, key interface{}) node {
+	return n
+}
+func (n *bitmapNode) find(shift int, hash uint64, key interface{}) (value interface{}, err error) {
+	bitsToShift := uint(shift*fanoutLog2)
+	pos := bitpos(hash, bitsToShift)
+	if cMap := n.childBitmap; (pos & cMap)  == 0 { //nothing in slot, not found
+		err = errors.New(keyNotFound)
+	} else {
+		index := n.index(pos)
+		if int(index) >= len(n.children) {
+			err = errors.New("Keys computed index is larger than children")
+		} else {
+			value, err = n.children[index].find(shift + 1, hash, key)
+		}
+	}
+
+	return value, err
+}
+func (n *bitmapNode) pos() uint64 {
+	return n.bitpos
+}
+
 
 //Shift key hash until leaf with matching key is found or key is not found
 func (t *PersistentMap) Get(key interface{}) (value interface{}, err error) {
 	//Hash our key and look for it in the root
 	hash := hash(key)
 	value, err = t.root.find(0, hash, key)
-	return
+
+	return value, err
 }
 
-//	node = t.root.children[mask(hash, 0)]
-//	
-//	//If our value is in the root or the hash does not map to root slot get out fast
-//	switch {
-//	case node == nil:
-//		return node, parent, errors.New(keyNotFound)
-//	case node.childBitmap == 0:
-//		if bytes.Equal(node.key, key) {
-//			return node, nil, nil
-//		}
-//	}
-//
-//	//Got here means our slot is sub trie
-//	for depth := 1; depth < maxDepth; depth++ {
-//		shift := uint(depth * fanoutLog2)
-//		pos := bitpos(hash, shift)
-//		parent = node
-//		if cMap := node.childBitmap; (pos & cMap)  == 0 { //nothing in slot, not found
-//			return nil, node, errors.New(keyNotFound)
-//		} else {
-//			index := node.index(pos)			
-//			node = parent.children[index]
-//			//Is this a value or map
-//			if node.isLeaf() {
-//				// Is this who we are looking for?
-//				if bytes.Equal(node.key, key) {
-//					return node, parent, nil 
-//				}
-//			} else {
-//				continue
-//			}
-//		}
-//	}
-//	
-//	return nil, parent, errors.New(keyNotFound)
-//}
-
 func (t *PersistentMap) Insert(key interface{}, value interface{}) (n node) {
-	//TODO: miles to go.....
-		
 	hash := hash(key)
-	n = t.root.assoc(0, hash, key, value)
-	if n.depth() == 0 {
-		t.root = n
-	}
+	_, n = t.root.assoc(0, hash, key, value)
+
 	return n
 }
 
-//	snode, parent, _ := t.Search(key)
-//
-//	if snode == nil {
-//
-//		node = NewSub(key, parent.depth +1)
-//		node.value = value
-//		pos := bitpos(hash, parent.depth * fanoutLog2)
-//		parent.childBitmap |= pos
-//		if parent.depth == 0 {
-//			parent.children[mask(hash, 0)] = node
-//		} else {
-//			parent.children[parent.index(pos)] = node
-//
-//	}
-//	}
-//	return node
-//}
-
-
-
 func New() *PersistentMap {
 	return &PersistentMap {
-		root: &emptyNode{},
+		root: &bitmapNode{},
 	}
 }
 
 func hash(a interface{}) uint64 {
 	buf := new(bytes.Buffer)
 	h := fnv.New64()
-	_, e := fmt.Fprint(buf, a)
+	_, e := fmt.Fprintf(buf, "%#v", a)
 
 	if e != nil {
 		//doSomethingWithErrors?
@@ -184,6 +178,6 @@ func bitpos(hash uint64, bshift uint) uint64 {
 	return 1 << mask(hash, bshift)
 }
 
-func (n *bitmapNode) index(bit uint64) uint {
-	return popcount_2(n.childBitmap & (bit - 1))
+func (n *bitmapNode) index(onebitset uint64) uint {
+	return popcount_2(n.childBitmap & (onebitset - 1))
 }
