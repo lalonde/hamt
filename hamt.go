@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	fanoutLog2 = 6
-	fanout uint = 1 << fanoutLog2
-	fanMask uint = fanout -1
-	maxDepth = 60/fanoutLog2
-	keyNotFound = "Key not found"
+	fanoutLog2       = 6
+	fanout      uint = 1 << fanoutLog2
+	fanMask     uint = fanout - 1
+	maxDepth         = 60 / fanoutLog2
+	keyNotFound      = "Key not found"
 )
 
 type Key []byte
@@ -26,20 +26,20 @@ type node interface {
 
 type PersistentMap struct {
 	root *bitmapNode
-//	collision map[uint]interface{}
+	//	collision map[uint]interface{}
 }
 
 type valueNode struct {
-	key Key
-	hash uint64
-	value interface{}
+	key    Key
+	hash   uint64
+	value  interface{}
 	bitpos uint64
 }
 
 type bitmapNode struct {
 	childBitmap uint64
-	children []node
-	bitpos uint64
+	children    []node
+	bitpos      uint64
 }
 
 func (n *valueNode) assoc(shift int, hash uint64, key Key, val interface{}) (last node, leaf *valueNode) {
@@ -75,17 +75,17 @@ func (n *valueNode) pos() uint64 {
 }
 
 func (n *bitmapNode) assoc(shift int, hash uint64, key Key, val interface{}) (last node, leaf *valueNode) {
-	bitsToShift := uint(shift*fanoutLog2)
+	bitsToShift := uint(shift * fanoutLog2)
 	pos := bitpos(hash, bitsToShift)
 
-	if (pos & n.childBitmap)  == 0 { //nothing in slot, not found
-		//mark our slot taken and xpand our children
+	if (pos & n.childBitmap) == 0 { //nothing in slot, not found
+		//mark our slot taken and expand our children
 		n.childBitmap |= pos
 		newChildren := make([]node, (len(n.children) + 1))
 
 		newChildIndex := n.index(pos)
 		newChild := &valueNode{key, hash, val, pos}
-		newChildren [newChildIndex] = newChild
+		newChildren[newChildIndex] = newChild
 
 		for _, c := range n.children {
 			if c != nil {
@@ -100,7 +100,7 @@ func (n *bitmapNode) assoc(shift int, hash uint64, key Key, val interface{}) (la
 	} else {
 		index := n.index(pos)
 		nodeAtIndex := n.children[index]
-		last, leaf = nodeAtIndex.assoc(shift +1, hash, key, val)
+		last, leaf = nodeAtIndex.assoc(shift+1, hash, key, val)
 
 		if _, isValNode := nodeAtIndex.(*valueNode); isValNode {
 			n.children[index] = last
@@ -114,16 +114,16 @@ func (n *bitmapNode) without(shift int, hash uint64, key Key) node {
 }
 
 func (n *bitmapNode) find(shift int, hash uint64, key Key) (value interface{}, err error) {
-	bitsToShift := uint(shift*fanoutLog2)
+	bitsToShift := uint(shift * fanoutLog2)
 	pos := bitpos(hash, bitsToShift)
-	if cMap := n.childBitmap; (pos & cMap)  == 0 { //nothing in slot, not found
+	if cMap := n.childBitmap; (pos & cMap) == 0 { //nothing in slot, not found
 		err = errors.New(keyNotFound)
 	} else {
 		index := n.index(pos)
 		if int(index) >= len(n.children) {
 			err = errors.New("Keys computed index is larger than children")
 		} else {
-			value, err = n.children[index].find(shift + 1, hash, key)
+			value, err = n.children[index].find(shift+1, hash, key)
 		}
 	}
 
@@ -151,7 +151,7 @@ func (t *PersistentMap) Insert(key Key, value interface{}) (n node) {
 }
 
 func New() *PersistentMap {
-	return &PersistentMap {
+	return &PersistentMap{
 		root: &bitmapNode{},
 	}
 }
@@ -189,5 +189,5 @@ func bitpos(hash uint64, bshift uint) uint64 {
 }
 
 func (n *bitmapNode) index(onebitset uint64) uint {
-	return popcount_2(n.childBitmap & (onebitset - 1))
+	return popcount_3(n.childBitmap & (onebitset - 1))
 }
