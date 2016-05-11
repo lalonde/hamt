@@ -1,14 +1,16 @@
 package hamt
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"testing"
 )
 
 func TestEmptyTrie(t *testing.T) {
 	trie := New()
-	
-	_,e := trie.Get("EMPTY")
+
+	_,e := trie.Get([]byte("EMPTY"))
 
 	if e==nil {
 		t.Errorf("Not finding a key, which we wont find in an empty trie, must return an err")
@@ -16,8 +18,8 @@ func TestEmptyTrie(t *testing.T) {
 }
 
 func TestInsertIntoTrie(t *testing.T) {
-	key1 := "store key1"
-	key2 := "store key2"
+	key1 := []byte("store key1")
+	key2 := []byte("store key2")
 
 	v1 := "value 1"
 	v2 := "value 2"
@@ -30,27 +32,27 @@ func TestInsertIntoTrie(t *testing.T) {
 
 	vg1, e1 := root.Get( key1 )
 	vg2, e2 := root.Get( key2 )
-	
+
 	if vg1 != v1 || vg2 != v2 {
 		t.Errorf("Set values for keys[%v=%v,%v=%v] do not match returned [%v=%v,%v=%v]",key1,v1,key2,v2,key1,vg1,key2,vg2)
 		t.Errorf("error return: %v, %v", e1, e2)
 	}
 
-	intKeys := make([]interface{}, 256)
+	intKeys := make([][]byte, 256)
 	for i := 0; i < 256; i++ {
-		intKeys[i] = i*2
+		intKeys[i] = IntKey(i)
 	}
-	
-	stringKeys := make([]interface{}, 256)
+
+	stringKeys := make([][]byte, 256)
 	for i := 0; i < 256; i++ {
-		stringKeys[i] = fmt.Sprint("String key", i)
+		stringKeys[i] = StringKey(fmt.Sprint("String key", i))
 	}
 
 	insertAndAssureStorageForKeys(intKeys, t)
 	insertAndAssureStorageForKeys(stringKeys, t)
 }
 
-func insertAndAssureStorageForKeys(keys []interface{}, t *testing.T) {
+func insertAndAssureStorageForKeys(keys [][]byte, t *testing.T) {
 	tree := New()
 	makeValueForKey := func (key interface{}) string { return fmt.Sprintf("Value for %v", key) }
 
@@ -93,7 +95,9 @@ func BenchmarkGoMapStringInsert(b *testing.B) {
 func BenchmarkHamtIntInsert(b *testing.B) {
 	t := New()
 	for i := 0; i < b.N; i++ {
-		t.Insert(i, i)
+		buf := new(bytes.Buffer)
+		binary.Write(buf, binary.LittleEndian, i)
+		t.Insert(buf.Bytes(), i)
 	}
 }
 
@@ -102,7 +106,6 @@ func BenchmarkHamtStringInsert(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		k := fmt.Sprintf("String Key %v", i)
 		v := fmt.Sprintf("String Val %v", i)
-		t.Insert(k, v)
+		t.Insert([]byte(k), v)
 	}
 }
-
